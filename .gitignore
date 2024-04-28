@@ -2,3 +2,7 @@ __pycache__
 .venv
 .vscode
 plots
+
+*.log
+*.html
+graphstats2html.py

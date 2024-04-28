@@ -1,10 +1,9 @@
-import os
-import base64
 import datetime
 import matplotlib
-from yattag import Doc, indent
-from typing import Tuple, List
+from typing import Tuple
 from matplotlib.figure import Figure
+
+Figures = list[Tuple[str, Figure]]
 
 MAXBANDWIDTH = 25000.0
 MAXBUFFER = 2.0
@@ -26,39 +25,41 @@ APPLY_PREFIX = [
 ]
 
 
-def parse_log(logname, mcu=None):
-    if mcu is None:
-        mcu = "mcu"
+def parse_log_file(logname, mcu="mcu"):
+    with open(logname, "r") as f:
+        lines = f.read().splitlines()
+        return parse_log_lines(lines, mcu)
+
+
+def parse_log_lines(lines: list[str], mcu="mcu"):
     mcu_prefix = mcu + ":"
     apply_prefix = {p: 1 for p in APPLY_PREFIX}
-    with open(logname, "r") as f:
-        out = []
-        for line in f:
-            parts = line.split()
-            if not parts or parts[0] not in ("Stats", "INFO:root:Stats"):
-                # if parts and parts[0] == 'INFO:root:shutdown:':
-                #    break
+
+    out = []
+    for line in lines:
+        parts = line.split()
+        if not parts or parts[0] not in ("Stats", "INFO:root:Stats"):
+            continue
+        prefix = ""
+        keyparts = {}
+        for p in parts[2:]:
+            if "=" not in p:
+                prefix = p
+                if prefix == mcu_prefix:
+                    prefix = ""
                 continue
-            prefix = ""
-            keyparts = {}
-            for p in parts[2:]:
-                if "=" not in p:
-                    prefix = p
-                    if prefix == mcu_prefix:
-                        prefix = ""
-                    continue
-                name, val = p.split("=", 1)
-                if name in apply_prefix:
-                    name = prefix + name
-                keyparts[name] = val
-            if "print_time" not in keyparts:
-                continue
-            keyparts["#sampletime"] = float(parts[1][:-1])
-            out.append(keyparts)
-        return out
+            name, val = p.split("=", 1)
+            if name in apply_prefix:
+                name = prefix + name
+            keyparts[name] = val
+        if "print_time" not in keyparts:
+            continue
+        keyparts["#sampletime"] = float(parts[1][:-1])
+        out.append(keyparts)
+    return out
 
 
-def setup_matplotlib(output_to_file):
+def setup_matplotlib(output_to_file=False):
     global matplotlib
     if output_to_file:
         matplotlib.use("Agg")
@@ -273,6 +274,8 @@ def plot_mcu_frequency(data, mcu):
 def plot_temperature(data, heaters):
     fig, ax1 = matplotlib.pyplot.subplots()
     ax2 = ax1.twinx()
+    if heaters is None:
+        heaters = "heater_bed,extruder"
     for heater in heaters.split(","):
         heater = heater.strip()
         temp_key = heater + ":" + "temp"
@@ -312,56 +315,17 @@ def plot_temperature(data, heaters):
     return fig
 
 
-def save_figure(fig: Figure, output: str):
-    fig.set_size_inches(8, 6)
-    fig.savefig(output)
+def draw_graphs(data: list[object], heater: str = None):
+    figures: Figures = []
 
+    if heater is None:
+        heater = "heater_bed,extruder"
 
-def generate_html(out_dir: str, figures: List[Tuple[str, Figure]]):
-    doc, tag, text = Doc().tagtext()
-
-    with tag("html"):
-        with tag("head"):
-            with tag("title"):
-                text("klippy.log helper")
-        with tag("body"):
-            with tag("div"):
-                for name, fig in figures:
-                    plot_path = os.path.join(os.getcwd(), out_dir, f"{name}.png")
-                    print(f"Opening {plot_path}")
-                    with open(plot_path, "rb") as f:
-                        src = base64.b64encode(f.read()).decode("utf-8")
-                        doc.stag("img", src=f"data:image/png;base64,{src}")
-                        pass
-
-    with open("klippy.log.html", "w") as f:
-        # print(doc.getvalue())
-        html = indent(
-            doc.getvalue(), indentation="    ", newline="\r\n", indent_text=True
-        )
-        f.write(html)
-
-
-def draw_graphs(
-    data,
-    out_dir: str = "plots",
-    # output=None,
-    mcu: str = "mcu",
-    heater: str = None,
-):
-    figures: List[Tuple[str, Figure]] = []
-
-    setup_matplotlib(True)
-    if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
+    setup_matplotlib()
 
     figures.append(("mcu", plot_mcu(data, MAXBANDWIDTH)))
     figures.append(("mcu_freq", plot_mcu_frequencies(data)))
     figures.append(("system", plot_system(data)))
-    figures.append(("heater", plot_temperature(data, heater)))
+    figures.append(("heaters", plot_temperature(data, heater)))
 
-    for name, fig in figures:
-        print(f"Saving {out_dir}/{name}.png")
-        save_figure(fig, os.path.join(out_dir, name))
-
-    generate_html(out_dir, figures)
+    return figures
