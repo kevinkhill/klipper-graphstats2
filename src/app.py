@@ -1,5 +1,3 @@
-import numpy as np
-import pandas as pd
 import streamlit as st
 from graphstats2 import draw_graphs, parse_log_lines
 
